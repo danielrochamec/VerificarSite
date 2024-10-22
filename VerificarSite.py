@@ -3,46 +3,69 @@ import tkinter as tk
 from tkinter import messagebox
 from tkinter import filedialog
 import string  # Para manipular as letras do alfabeto
+import webbrowser  # Para abrir URLs no navegador
+import pandas as pd  # Para salvar em Excel
+import threading  # Para rodar as verificações em background
 
 # Função para verificar a URL
 def verificar_url(url):
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            return f"URL {url} está ativa!\n"
+            return url  # Retorna a URL ativa
         else:
-            return f"URL {url} retornou o status {response.status_code}.\n"
+            return None  # Ignora URLs inativas
     except requests.exceptions.ConnectionError:
-        return f"URL {url} está inativa (erro de conexão).\n"
+        return None  # Ignora URLs inativas
     except requests.exceptions.Timeout:
-        return f"URL {url} não respondeu a tempo (timeout).\n"
-    except requests.exceptions.RequestException as e:
-        return f"Ocorreu um erro: {e}\n"
+        return None  # Ignora URLs inativas
+    except requests.exceptions.RequestException:
+        return None  # Ignora URLs inativas
 
 # Função para gerar sequência de números ou letras
 def verificar_urls_com_sequencia(url_base, inicio, fim, tipo_sequencia):
-    resultado = ""
-
+    urls_ativas = []  # Armazena as URLs ativas para salvar posteriormente
     if tipo_sequencia == "Números":
         for i in range(inicio, fim + 1):
             url_modificada = url_base.format(n=i)
-            resultado += verificar_url(url_modificada)
+            url = verificar_url(url_modificada)
+            if url:  # Exibe apenas URLs ativas
+                adicionar_resultado(url)
+                urls_ativas.append(url)  # Adiciona a URL ativa à lista
 
     elif tipo_sequencia == "Letras":
         letras = string.ascii_lowercase  # a até z
         for letra in letras[inicio:fim + 1]:
             url_modificada = url_base.format(n=letra)
-            resultado += verificar_url(url_modificada)
+            url = verificar_url(url_modificada)
+            if url:  # Exibe apenas URLs ativas
+                adicionar_resultado(url)
+                urls_ativas.append(url)  # Adiciona a URL ativa à lista
+    
+    return urls_ativas
 
-    return resultado
+# Função para adicionar o resultado na área de texto e torná-lo clicável
+def adicionar_resultado(url):
+    resultado_texto.insert(tk.END, url, url)
+    resultado_texto.insert(tk.END, "\n")
+    resultado_texto.tag_add(url, "end-1c linestart", "end-1c")
+    resultado_texto.tag_config(url, foreground="blue", underline=True)
+    resultado_texto.tag_bind(url, "<Button-1>", lambda e, link=url: webbrowser.open(link))
+    resultado_texto.see(tk.END)  # Move a barra de rolagem para o final
 
-# Função para salvar o resultado em um arquivo txt
-def salvar_arquivo(conteudo):
-    file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Arquivo de Texto", "*.txt")])
-    if file_path:
-        with open(file_path, 'w') as file:
-            file.write(conteudo)
-        messagebox.showinfo("Sucesso", "Arquivo salvo com sucesso!")
+# Função para salvar o resultado em um arquivo Excel
+def salvar_arquivo_excel():
+    urls_ativas = resultado_texto.get("1.0", tk.END).splitlines()  # Obtém as URLs ativas exibidas
+    if urls_ativas:
+        file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Arquivo Excel", "*.xlsx")])
+        if file_path:
+            # Cria um DataFrame com as URLs ativas
+            df = pd.DataFrame(urls_ativas, columns=["URLs Ativas"])
+            # Salva o DataFrame em um arquivo Excel
+            df.to_excel(file_path, index=False)
+            messagebox.showinfo("Sucesso", "Arquivo Excel salvo com sucesso!")
+    else:
+        messagebox.showwarning("Aviso", "Não há URLs para salvar.")
 
 # Função chamada ao clicar no botão "Verificar URLs"
 def verificar():
@@ -72,14 +95,28 @@ def verificar():
         messagebox.showerror("Erro", f"Entrada inválida: {e}")
         return
 
-    resultado = verificar_urls_com_sequencia(url_base, inicio, fim, tipo_sequencia)
     resultado_texto.delete("1.0", tk.END)  # Limpa o campo de texto
-    resultado_texto.insert(tk.END, resultado)
+
+    # Exibe mensagem de início de pesquisa
+    resultado_texto.insert(tk.END, "Iniciando a pesquisa...\n")
+    resultado_texto.see(tk.END)  # Move a barra de rolagem para o final
+
+    # Iniciar a verificação das URLs em uma nova thread
+    thread = threading.Thread(target=background_verificacao, args=(url_base, inicio, fim, tipo_sequencia))
+    thread.start()
+
+# Função para rodar a verificação em segundo plano (background)
+def background_verificacao(url_base, inicio, fim, tipo_sequencia):
+    verificar_urls_com_sequencia(url_base, inicio, fim, tipo_sequencia)
+
+    # Exibe mensagem de fim de pesquisa
+    resultado_texto.insert(tk.END, "\n--- Fim da pesquisa ---\n")
+    resultado_texto.see(tk.END)  # Move a barra de rolagem para o final
+    messagebox.showinfo("Fim da Verificação", "A verificação das URLs foi concluída!")
 
 # Função chamada ao clicar no botão "Salvar Resultado"
 def salvar():
-    conteudo = resultado_texto.get("1.0", tk.END)
-    salvar_arquivo(conteudo)
+    salvar_arquivo_excel()
 
 # Criação da janela principal
 janela = tk.Tk()
@@ -111,8 +148,13 @@ botao_salvar = tk.Button(janela, text="Salvar Resultado", command=salvar)
 botao_salvar.grid(row=4, column=1, padx=10, pady=10)
 
 # Área de texto para mostrar o resultado
-resultado_texto = tk.Text(janela, height=10, width=80)
+resultado_texto = tk.Text(janela, height=10, width=80, wrap="word")
 resultado_texto.grid(row=5, column=0, columnspan=2, padx=10, pady=10)
+
+# Adicionando barra de rolagem
+scrollbar = tk.Scrollbar(janela, command=resultado_texto.yview)
+scrollbar.grid(row=5, column=2, sticky='nsew')
+resultado_texto['yscrollcommand'] = scrollbar.set
 
 # Iniciar o loop da interface
 janela.mainloop()
